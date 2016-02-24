@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["BorrowBytes","A trait that permits borrowing byte vectors.This is useful for providing an API that can abstract over Unicode strings and byte strings."]]});

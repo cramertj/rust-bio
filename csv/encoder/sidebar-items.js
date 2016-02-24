@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Encoded","A record to be encoded.This is a \"wrapper\" type that allows the `Encoder` machinery from the `serialize` crate to encode a *single* CSV record from your custom types.Generally, you should not need to use this type directly. Instead, you should prefer the `encode` or `encode_all` methods defined on `CsvWriter`."]]});

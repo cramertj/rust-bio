@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Decoded","A record to be decoded.This is a \"wrapper\" type that allows the `Decoder` machinery from the `serialize` crate to decode a *single* CSV record into your custom types.Generally, you should not need to use this type directly. Instead, you should prefer the `decode` or `decode_all` methods defined on `CsvReader`."]]});
