@@ -106,17 +106,98 @@ impl FMIndex {
         }
     }
 
-    fn occ(&self, r: usize, a: u8) -> usize {
+    pub fn occ(&self, r: usize, a: u8) -> usize {
         self.occ.get(&self.bwt, r, a)
     }
 
-    fn less(&self, a: u8) -> usize {
+    pub fn occ_lt(&self, r: usize, a: u8) -> usize {
+        let mut less = 0;
+        for i in 0..a {
+            less += self.occ.get(&self.bwt, r, i);
+        }
+        less
+    }
+
+    pub fn less(&self, a: u8) -> usize {
         self.less[a as usize]
     }
 
     /// Provide a reference to the underlying BWT.
     pub fn bwt(&self) -> &BWT {
         &self.bwt
+    }
+
+    #[inline(always)]
+    fn update_backward(&self, interval: &mut Interval, a: u8) {
+        interval.lower = self.less(a) + self.occ(interval.lower-1, a);
+        interval.upper = self.less(a) + self.occ(interval.upper, a) - 1;
+    }
+
+    #[inline(always)]
+    fn update_fwd_bwd(&self, interval: &mut Interval, _interval: &mut Interval, a: u8) {
+        _interval.lower = _interval.lower + (self.occ_lt(interval.upper, a) - self.occ_lt(interval.lower-1, a));
+        _interval.upper = _interval.upper + (self.occ(interval.upper, a) - self.occ(interval.lower-1, a) - 1);
+        self.update_backward(interval, a);
+    }
+
+    pub fn find_overlap_intervals(&self, pattern: &[u8], min_overlap: usize) -> Vec<(Interval, Interval)> {
+        let mut j = vec![];
+        let mut i = pattern.len();
+        let mut interval = Interval {
+            lower: self.less(pattern[i - 1]),
+            upper: self.less(pattern[i - 1] + 1) - 1,
+        };
+        let mut _interval = interval;
+        i -= 1;
+
+        while interval.lower <= interval.upper && i >= 0 {
+            if pattern.len() - i + 1 >= min_overlap {
+                let mut s_interval = interval;
+                let mut s_interval_p = _interval;
+                self.update_fwd_bwd(&mut s_interval, &mut s_interval_p, b'$');
+                if s_interval.lower <= s_interval.upper {
+                    j.push((s_interval, s_interval_p));
+                }
+            }
+            self.update_fwd_bwd(&mut interval, &mut _interval, pattern[i]);
+            i -= 1;
+        }
+
+        j
+    }
+
+    pub fn extract_irreducible(&self, j: Vec<(Interval, Interval)>) -> Vec<Interval> {
+        if j.len() == 0 {
+            return vec![];
+        }
+        let mut l = vec![];
+        for j_index in 0..j.len() {
+            let (interval, _interval) = j[j_index];
+            let mut s_interval = interval;
+            let mut s_interval_p = _interval;
+            self.update_fwd_bwd(&mut s_interval_p, &mut s_interval, b'$');
+            if s_interval.lower <= s_interval.upper {
+                l.push(s_interval);
+            }
+        }
+        if l.len() == 0 {
+            return vec![];
+        }
+
+        for i in 0..255 {
+            let a = i as u8;
+            let mut j_a = vec![];
+            for j_index in 0..j.len() {
+                let (mut interval, mut _interval) = j[j_index];
+                self.update_fwd_bwd(&mut _interval, &mut interval, a);
+                if interval.lower <= interval.upper {
+                    j_a.push((interval, _interval));
+                }
+            }
+            l.append(&mut self.extract_irreducible(j_a));
+        }
+
+        return l;
     }
 }
 
@@ -192,37 +273,6 @@ impl FMDIndex {
             fmindex: FMIndex::new(bwt, k, &alphabet),
             revcomp: dna::RevComp::new(),
         }
-    }
-
-    /// Find longest suffix that overlaps (but does not encompass) the prefix of the search pattern
-    /// Returns the matching suffixes and the size of the overlap
-    pub fn longest_suffix_prefix_match(&self, pattern: &[u8], min_overlap: usize) -> Option<(usize, BiInterval)> {
-        let exact_match_interval = self.fmindex.backward_search(pattern.iter());
-        let exact_match_size = exact_match_interval.upper - exact_match_interval.lower;
-        let mut interval = self.init_interval(pattern, 0);
-        let mut interval_stack = vec![];
-
-        for &a in pattern[1..].iter() {
-            // forward extend interval
-            let _interval = self.forward_ext(&interval, a);
-
-            // if new interval represents only exact matches, break
-            if _interval.size <= exact_match_size {
-                break;
-            } else if _interval.match_size >= min_overlap {
-                interval_stack.push(_interval);
-            }
-            interval = _interval;
-        }
-
-        while let Some(longest_interval) = interval_stack.pop() {
-            let prefixes = self.forward_ext(&longest_interval, SENT_CHAR);
-            if prefixes.size > 0 {
-                return Some((longest_interval.match_size, prefixes));
-            }
-        }
-
-        None
     }
 
     /// Find supermaximal exact matches of given pattern that overlap position i in the pattern.
@@ -391,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn test_longest_prefix() {
+    fn test_irreducible_overlap() {
         let desired_prefix = b"GCCTTCGC";
         let search_str = b"TTCGCAG";
         let contains = b"AATTCGCAGA";
@@ -408,9 +458,11 @@ mod tests {
                         .collect::<Vec<u8>>();
         let pos = suffix_array(&text);
         let fmdindex = FMDIndex::new(bwt(&text, &pos), 3);
-        let (_, longest_prefix_matches) = fmdindex.longest_suffix_prefix_match(search_str, 0)
-                                             .expect("Should find prefix");
-        assert_eq!(longest_prefix_matches.occ(&pos), [3]);
+        let overlap_intervals = fmdindex.fmindex().find_overlap_intervals(search_str, 4);
+        println!("Overlap intervals: {:?}", overlap_intervals);
+        let irreducible = fmdindex.fmindex().extract_irreducible(overlap_intervals);
+        println!("Irreducible: {:?}", irreducible);
+        // TODO: assertions
     }
 
     #[test]
